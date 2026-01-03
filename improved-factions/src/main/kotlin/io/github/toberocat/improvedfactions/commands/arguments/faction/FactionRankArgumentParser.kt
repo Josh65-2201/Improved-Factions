@@ -10,11 +10,11 @@ import io.github.toberocat.improvedfactions.user.factionUser
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
-@Localization("base.arguments.faction-rank.not-player")
+@Localization("base.arguments.shared.not-player")
 @Localization("base.arguments.faction-rank.not-found")
 class FactionRankArgumentParser : ArgumentParser {
     override fun parse(sender: CommandSender, arg: String, args: Array<String>): Any {
-        val user = (sender as? Player)?.factionUser() ?: throw ArgumentParsingException("base.arguments.faction-rank.not-player")
+        val user = (sender as? Player)?.factionUser() ?: throw ArgumentParsingException("base.arguments.shared.not-player")
         return user.faction()?.anyRank(arg) ?: throw ArgumentParsingException("base.arguments.faction-rank.not-found")
     }
 

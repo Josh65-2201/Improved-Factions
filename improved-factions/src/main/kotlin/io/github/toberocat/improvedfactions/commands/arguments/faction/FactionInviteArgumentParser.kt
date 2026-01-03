@@ -11,13 +11,13 @@ import io.github.toberocat.improvedfactions.user.factionUser
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
-@Localization("base.arguments.faction-invite.not-player")
+@Localization("base.arguments.shared.not-player")
 @Localization("base.arguments.faction-invite.not-found")
 @Localization("base.arguments.faction-invite.not-invited")
 class FactionInviteArgumentParser : ArgumentParser {
     override fun parse(sender: CommandSender, arg: String, args: Array<String>): FactionInvite {
         if (sender !is Player) {
-            throw ArgumentParsingException("base.arguments.faction-invite.not-player")
+            throw ArgumentParsingException("base.arguments.shared.not-player")
         }
 
         val faction = FactionHandler.getFaction(arg)
