@@ -4,9 +4,9 @@ import io.github.toberocat.improvedfactions.ImprovedFactionsPlugin
 import io.github.toberocat.improvedfactions.utils.toAudience
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
-import net.kyori.adventure.text.serializer.ComponentSerializer
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.OfflinePlayer
+import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import java.util.*
 
@@ -17,16 +17,28 @@ import java.util.*
  */
 typealias LocalizationKey = String
 
+fun CommandSender.resolveLocalization(key: String, placeholders: Map<String, String> = emptyMap()) = when (this) {
+    is Player -> getLocaleEnum().localizeUnformatted(key, placeholders)
+    else -> Locale.ENGLISH.localizeUnformatted(key, placeholders)
+}
+
+fun CommandSender.sendLocalized(key: String, placeholders: Map<String, String> = emptyMap()) {
+    when (this) {
+        is Player -> sendLocalized(key, placeholders)
+        else -> sendMessage(Locale.ENGLISH.localizeUnformatted(key, placeholders))
+    }
+}
+
 fun OfflinePlayer.sendLocalized(key: String, placeholders: Map<String, String> = emptyMap()) {
     player?.sendLocalized(key, placeholders)
     // ToDo: Make sure players can catch up on messages when they log in
 }
 
-fun Player.sendLocalized(key: String, placeholders: Map<String, String> = emptyMap()) =
-    toAudience().sendMessage(getLocalized(key, placeholders))
+fun Player.sendLocalized(key: String, placeholders: Map<String, String> = emptyMap(), prefixMessage: Boolean = false) =
+    toAudience().sendMessage(getLocalized(key, placeholders, prefixMessage))
 
-fun Player.getLocalized(key: String, placeholders: Map<String, String> = emptyMap()) =
-    getLocaleEnum().localize(key, placeholders)
+fun Player.getLocalized(key: String, placeholders: Map<String, String> = emptyMap(), prefixMessage: Boolean = false) =
+    getLocaleEnum().localize(key, placeholders, prefixMessage)
 
 fun Player.getLocaleEnum(): Locale {
     val localeParts = locale.split("_")
@@ -39,19 +51,36 @@ fun Player.getLocaleEnum(): Locale {
     return locale
 }
 
-fun Player.getUnformattedLocalized(key: String, placeholders: Map<String, String> = emptyMap()) =
-    getLocaleEnum().localizeUnformatted(key, placeholders)
+fun CommandSender.getUnformattedLocalized(key: String, placeholders: Map<String, String> = emptyMap()): String {
+    val locale = when (this) {
+        is Player -> getLocaleEnum()
+        else -> Locale.ENGLISH
+    }
+    return locale.localizeUnformatted(key, placeholders)
+}
 
-fun Locale.localize(key: LocalizationKey, placeholders: Map<String, String>): Component =
-    MiniMessage.miniMessage().deserialize(localizeUnformatted(key, placeholders))
+fun Locale.localize(
+    key: LocalizationKey,
+    placeholders: Map<String, String>,
+    prefixMessage: Boolean = false
+): Component =
+    MiniMessage.miniMessage().deserialize(localizeUnformatted(key, placeholders, prefixMessage))
 
-fun Locale.localizeUnformatted(key: LocalizationKey, placeholders: Map<String, String>): String {
+fun Locale.localizeUnformatted(
+    key: LocalizationKey,
+    placeholders: Map<String, String>,
+    prefixMessage: Boolean = false
+): String {
     val bundle = getBundle()
     if (!bundle.containsKey(key)) {
         ImprovedFactionsPlugin.instance.logger.warning("Missing $key in the language file for $this")
         return key
     }
-    val localizedString = bundle.getString(key)
+    var localizedString = bundle.getString(key)
+    if (prefixMessage && !localizedString.trim().startsWith("{prefix}")) {
+        localizedString = "{prefix} $localizedString"
+    }
+    
     val mutablePlaceholders = placeholders.toMutableMap()
     if (bundle.containsKey("base.prefix")) mutablePlaceholders["prefix"] = bundle.getString("base.prefix")
 

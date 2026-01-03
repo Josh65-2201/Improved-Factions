@@ -1,19 +1,20 @@
 package io.github.toberocat.improvedfactions.modules.power
 
 import io.github.toberocat.improvedfactions.ImprovedFactionsPlugin
-import io.github.toberocat.improvedfactions.modules.base.BaseModule
-import io.github.toberocat.improvedfactions.modules.power.commands.PowerCommand
-import io.github.toberocat.improvedfactions.modules.power.commands.SiegeCommand
+import io.github.toberocat.improvedfactions.annotations.papi.PapiPlaceholder
+import io.github.toberocat.improvedfactions.commands.processor.powerRaidsCommandProcessors
+import io.github.toberocat.improvedfactions.modules.Module
 import io.github.toberocat.improvedfactions.modules.power.config.PowerManagementConfig
 import io.github.toberocat.improvedfactions.modules.power.handles.DummyFactionPowerRaidModuleHandle
 import io.github.toberocat.improvedfactions.modules.power.handles.FactionPowerRaidModuleHandle
 import io.github.toberocat.improvedfactions.modules.power.impl.FactionPowerRaidModuleHandleImpl
 import io.github.toberocat.improvedfactions.modules.power.listener.PlayerDeathListener
 import io.github.toberocat.improvedfactions.user.factionUser
-import io.github.toberocat.toberocore.command.CommandExecutor
+import io.github.toberocat.improvedfactions.utils.toCountdownTime
 import org.bukkit.OfflinePlayer
 
-class PowerRaidsModule : BaseModule {
+object PowerRaidsModule : Module {
+    const val MODULE_NAME = "power-raids"
     override val moduleName = MODULE_NAME
     override var isEnabled = false
 
@@ -32,27 +33,73 @@ class PowerRaidsModule : BaseModule {
         powerModuleHandle.reloadConfig(plugin)
     }
 
-    override fun addCommands(plugin: ImprovedFactionsPlugin, executor: CommandExecutor) {
-        executor.addChild(PowerCommand(plugin, powerModuleHandle as FactionPowerRaidModuleHandleImpl))
-        executor.addChild(SiegeCommand(plugin, powerModuleHandle as FactionPowerRaidModuleHandleImpl))
-    }
+    override fun getCommandProcessors(plugin: ImprovedFactionsPlugin) =
+        powerRaidsCommandProcessors(plugin)
 
-    override fun onPapiPlaceholder(placeholders: HashMap<String, (player: OfflinePlayer) -> String?>) {
+    @PapiPlaceholder("power", MODULE_NAME, "The power of your faction")
+    @PapiPlaceholder("max_power", MODULE_NAME, "The maximum power of your faction")
+    override fun onPlaceholder(placeholders: HashMap<String, (player: OfflinePlayer) -> String?>) {
         placeholders["power"] = { it.factionUser().faction()?.accumulatedPower?.toString() }
-        placeholders["maxPower"] = { it.factionUser().faction()?.maxPower?.toString() }
-        (powerModuleHandle as? FactionPowerRaidModuleHandleImpl)?.let { handle ->
-            placeholders["active_accumulation"] =
-                { player -> player.factionUser().faction()?.let { handle.getActivePowerAccumulation(it).toString() } }
-            placeholders["inactive_accumulation"] =
-                { player -> player.factionUser().faction()?.let { handle.getInactivePowerAccumulation(it).toString() } }
-            placeholders["claim_upkeep_cost"] =
-                { player -> player.factionUser().faction()?.let { handle.getClaimMaintenanceCost(it).toString() } }
+        placeholders["max_power"] = { it.factionUser().faction()?.maxPower?.toString() }
+
+        (powerModuleHandle as? FactionPowerRaidModuleHandleImpl)?.let {
+            registerPowerSpecificPlaceholders(it, placeholders)
         }
     }
 
-    companion object {
-        const val MODULE_NAME = "power-raids"
-        fun powerRaidModule() = ImprovedFactionsPlugin.instance.moduleManager.getModule<PowerRaidsModule>(MODULE_NAME)
-        fun powerRaidsPair() = MODULE_NAME to PowerRaidsModule()
+    fun powerRaidModule() = ImprovedFactionsPlugin.instance.moduleManager.getModule<PowerRaidsModule>(MODULE_NAME)
+    fun powerRaidsPair() = MODULE_NAME to this
+
+
+    @PapiPlaceholder("next_power_gain", MODULE_NAME, "The power that will be gained on the next power gain")
+    @PapiPlaceholder("claim_upkeep_cost", MODULE_NAME, "The cost of maintaining your claims")
+    @PapiPlaceholder("next_claim_cost", MODULE_NAME, "The cost of claiming the next chunk")
+    @PapiPlaceholder(
+        "active_accumulation",
+        MODULE_NAME,
+        "The power that is currently being accumulated by your active members"
+    )
+    @PapiPlaceholder(
+        "inactive_accumulation",
+        MODULE_NAME,
+        "The power that you currently lose due to inactive members"
+    )
+    @PapiPlaceholder(
+        "inactive_accumulation",
+        MODULE_NAME,
+        "The power that you currently lose due to inactive members"
+    )
+    @PapiPlaceholder(
+        "next_accumulation_cycle",
+        MODULE_NAME,
+        "The time left until the next power accumulation cycle"
+    )
+    @PapiPlaceholder(
+        "next_claim_keep_cost_cycle",
+        MODULE_NAME,
+        "The time left until the next claim keep cost cycle"
+    )
+    private fun registerPowerSpecificPlaceholders(
+        handle: FactionPowerRaidModuleHandleImpl,
+        placeholders: HashMap<String, (player: OfflinePlayer) -> String?>
+    ) {
+        placeholders["next_power_gain"] =
+            { player -> player.factionUser().faction()?.let { String.format("%.2f", handle.getPowerAccumulated(it)) } }
+        placeholders["active_accumulation"] =
+            { player -> player.factionUser().faction()?.let { handle.getActivePowerAccumulation(it).toString() } }
+        placeholders["inactive_accumulation"] =
+            { player -> player.factionUser().faction()?.let { handle.getInactivePowerAccumulation(it).toString() } }
+        placeholders["claim_upkeep_cost"] =
+            { player -> player.factionUser().faction()?.let { handle.getClaimMaintenanceCost(it).toString() } }
+        placeholders["next_claim_cost"] =
+            { player -> player.factionUser().faction()?.let { handle.getNextClaimCost(it).toString() } }
+        placeholders["next_accumulation_cycle"] = {
+            val nextCycleMs = handle.nextAccumulationCycleTime()
+            (nextCycleMs - System.currentTimeMillis()).toCountdownTime()
+        }
+        placeholders["next_claim_keep_cost_cycle"] = {
+            val nextCycleMs = handle.nextClaimKeepCostCycleTime()
+            (nextCycleMs - System.currentTimeMillis()).toCountdownTime()
+        }
     }
 }

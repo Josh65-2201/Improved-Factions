@@ -1,28 +1,34 @@
 package io.github.toberocat.improvedfactions.factions
 
-import dev.s7a.base64.Base64ItemStack
 import io.github.toberocat.improvedfactions.ImprovedFactionsPlugin
+import io.github.toberocat.improvedfactions.annotations.localization.Localization
 import io.github.toberocat.improvedfactions.claims.*
-import io.github.toberocat.improvedfactions.claims.clustering.position.ChunkPosition
 import io.github.toberocat.improvedfactions.database.DatabaseManager.loggedTransaction
 import io.github.toberocat.improvedfactions.exceptions.*
 import io.github.toberocat.improvedfactions.factions.ban.FactionBan
 import io.github.toberocat.improvedfactions.factions.ban.FactionBans
 import io.github.toberocat.improvedfactions.invites.FactionInvite
-import io.github.toberocat.improvedfactions.invites.FactionInvites
 import io.github.toberocat.improvedfactions.messages.MessageBroker
+import io.github.toberocat.improvedfactions.modules.base.BaseModule
 import io.github.toberocat.improvedfactions.modules.chat.ChatModule.resetChatMode
-import io.github.toberocat.improvedfactions.modules.power.PowerRaidsModule.Companion.powerRaidModule
+import io.github.toberocat.improvedfactions.modules.dynmap.DynmapModule
+import io.github.toberocat.improvedfactions.modules.home.HomeModule.getHome
+import io.github.toberocat.improvedfactions.modules.power.PowerRaidsModule.powerRaidModule
 import io.github.toberocat.improvedfactions.modules.relations.RelationsModule
-import io.github.toberocat.improvedfactions.modules.relations.RelationsModule.allies
+import io.github.toberocat.improvedfactions.ranks.FactionRank
 import io.github.toberocat.improvedfactions.ranks.FactionRankHandler
+import io.github.toberocat.improvedfactions.api.events.FactionDeleteEvent
+import io.github.toberocat.improvedfactions.api.events.FactionJoinEvent
+import io.github.toberocat.improvedfactions.api.events.FactionLeaveEvent
 import io.github.toberocat.improvedfactions.ranks.listRanks
 import io.github.toberocat.improvedfactions.translation.LocalizationKey
+import io.github.toberocat.improvedfactions.translation.LocalizedException
 import io.github.toberocat.improvedfactions.translation.sendLocalized
 import io.github.toberocat.improvedfactions.user.FactionUser
 import io.github.toberocat.improvedfactions.user.FactionUsers
 import io.github.toberocat.improvedfactions.user.factionUser
 import io.github.toberocat.improvedfactions.user.noFactionId
+import io.github.toberocat.improvedfactions.utils.Base64Item
 import io.github.toberocat.improvedfactions.utils.toOfflinePlayer
 import io.github.toberocat.toberocore.command.exceptions.CommandException
 import io.github.toberocat.toberocore.util.ItemUtils
@@ -88,27 +94,32 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
 
     var icon: ItemStack
         get() {
-            val item = Base64ItemStack.decode(base64Icon) ?: ItemStack(Material.GRASS_BLOCK)
+            val item = base64Icon?.let { Base64Item.decode(it) } ?: ItemStack(Material.GRASS_BLOCK)
             ItemUtils.editMeta(item) { it.setDisplayName("§e${localName}") }
             return item
         }
         set(value) {
-            val base64 = Base64ItemStack.encode(value)
-            if (base64.length > Factions.maxIconLength) throw CommandException(
+            val base64 = runCatching { Base64Item.encode(value) }.getOrNull() ?: return
+            if (base64.length > BaseModule.config.maxFactionIconLength) throw CommandException(
                 "base.exceptions.icon.invalid-icon", emptyMap()
             )
             base64Icon = base64
         }
 
     override fun delete() {
-        ImprovedFactionsPlugin.instance.claimChunkClusters.removeFactionClusters(this)
+        val event = FactionDeleteEvent(this)
+        Bukkit.getPluginManager().callEvent(event)
+        if (event.isCancelled()) return
+        
+        BaseModule.claimChunkClusters.removeFactionClusters(this)
+        DynmapModule.dynmapModule().dynmapModuleHandle.removeHome(this)
         listRanks().forEach { it.delete() }
         claims().forEach {
             it.factionId = noFactionId
         }
         members().forEach { unsetUserData(it) }
         RelationsModule.deleteFactionRelations(id.value)
-
+        
         super.delete()
     }
 
@@ -146,7 +157,7 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
             )
         )
 
-        ImprovedFactionsPlugin.instance.claimChunkClusters.markFactionClusterForUpdate(this)
+        BaseModule.claimChunkClusters.markFactionClusterForUpdate(this)
         localAccumulatedPower = actualNewAccumulatedPower
     }
 
@@ -178,6 +189,10 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
         if (isBanned(user))
             throw CommandException("base.exceptions.you-are-banned", emptyMap())
 
+        val event = FactionJoinEvent(this, user)
+        Bukkit.getPluginManager().callEvent(event)
+        if (event.isCancelled()) return
+        
         user.factionId = id.value
         user.assignedRank = rankId
 
@@ -210,7 +225,7 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
         Bukkit.getScheduler().runTaskLater(
             ImprovedFactionsPlugin.instance,
             Runnable { loggedTransaction { invite.delete() } },
-            FactionInvites.inviteExpiresInMinutes * 60 * 20L
+            BaseModule.config.inviteExpiresInMinutes * 60 * 20L
         )
 
         broadcast(
@@ -226,7 +241,7 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
     fun claimSquare(
         centerChunk: Chunk,
         squareRadius: Int,
-        handleError: (e: CommandException) -> Unit,
+        handleError: (e: LocalizedException) -> Unit,
     ): ClaimStatistics =
         squareClaimAction(centerChunk, squareRadius, { claim(it, announce = false) }, handleError)
 
@@ -244,7 +259,7 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
         }
 
         factionClaim.factionId = factionId
-        ImprovedFactionsPlugin.instance.claimChunkClusters.insertFactionPosition(
+        BaseModule.claimChunkClusters.insertFactionPosition(
             factionClaim,
             id.value
         )
@@ -264,15 +279,18 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
     fun isBanned(user: FactionUser): Boolean =
         FactionBan.count(FactionBans.user eq user.id and (FactionBans.faction eq id)) != 0L
 
-    fun unclaimSquare(chunk: Chunk, squareRadius: Int, handleError: (e: CommandException) -> Unit) =
+    fun unclaimSquare(chunk: Chunk, squareRadius: Int, handleError: (e: LocalizedException) -> Unit) =
         squareClaimAction(chunk, squareRadius, { unclaim(it, announce = false) }, handleError)
 
     @Throws(FactionDoesntHaveThisClaimException::class)
     fun unclaim(chunk: Chunk, announce: Boolean = true) {
         val claim = chunk.getFactionClaim()
         if (claim == null || claim.factionId != id.value) throw FactionDoesntHaveThisClaimException()
+        val homeLocation = claim.faction()?.getHome()
+        if (homeLocation != null && homeLocation.chunk == chunk) throw ClaimHasHomeException()
+
         claim.factionId = noFactionId
-        ImprovedFactionsPlugin.instance.claimChunkClusters.removePosition(claim)
+        BaseModule.claimChunkClusters.removePosition(claim)
         if (announce) {
             broadcast(
                 "base.faction.chunk-unclaimed", mapOf(
@@ -295,7 +313,10 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
         if (owner == user.uniqueId) throw PlayerIsOwnerLeaveException()
         if (isBanned(user))
             throw CommandException("base.exceptions.already-banned", emptyMap())
-        unsetUserData(user)
+
+        if (user.factionId == id.value) {
+            unsetUserData(user)
+        }
 
         val f = this
         FactionBan.new {
@@ -309,8 +330,13 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
     @Throws(PlayerIsOwnerLeaveException::class)
     fun leave(player: UUID) {
         if (owner == player) throw PlayerIsOwnerLeaveException()
-
-        unsetUserData(player.factionUser())
+        
+        val user = player.factionUser()
+        val event = FactionLeaveEvent(this, user)
+        Bukkit.getPluginManager().callEvent(event)
+        if (event.isCancelled()) return
+        
+        unsetUserData(user)
         broadcast(
             "base.faction.player-left", mapOf(
                 "player" to (Bukkit.getOfflinePlayer(player).name ?: "unknown")
@@ -343,4 +369,9 @@ class Faction(id: EntityID<Int>) : IntEntity(id) {
         user.player()?.resetChatMode()
         powerRaidModule().powerModuleHandle.memberLeave(this)
     }
+
+    @Localization("base.exceptions.rank-not-found")
+    fun getDefaultRank() = FactionRank.findById(defaultRank) ?: throw LocalizedException(
+        "base.exceptions.rank-not-found", emptyMap()
+    )
 }
