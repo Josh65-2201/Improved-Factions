@@ -36,7 +36,7 @@ jobs:
 
       - name: Build dokka documentation
         working-directory: ./improved-factions
-        run: ./gradlew dokkaDocusaurus
+        run: ./gradlew dokkaGenerate
 
       - name: Copy generated docs to wiki docs folder
         run: cp -rf ./improved-factions/build/generated/ksp/main/resources/docs/* ./improved-factions-docs/docs/
