@@ -9,12 +9,12 @@ import io.github.toberocat.improvedfactions.user.factionUser
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
-@Localization("base.arguments.faction-ban.not-player")
+@Localization("base.arguments.shared.not-player")
 @Localization("base.arguments.faction-ban.not-found")
 class FactionBanArgumentParser : ArgumentParser {
     override fun parse(sender: CommandSender, arg: String, args: Array<String>): Any {
         val user = (sender as? Player)?.factionUser()
-            ?: throw ArgumentParsingException("base.arguments.faction-ban.not-player")
+            ?: throw ArgumentParsingException("base.arguments.shared.not-player")
         val faction = user.faction()
             ?: throw ArgumentParsingException("base.arguments.faction-ban.not-found")
 
